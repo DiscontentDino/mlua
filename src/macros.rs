@@ -14,6 +14,60 @@ macro_rules! cstr {
     };
 }
 
+macro_rules! raise_error {
+    ($state:expr) => {
+        raise_error!($state, ::ffi::LUA_RAISED)
+    };
+
+    ($state:expr, ()) => {{
+        #[cfg(feature = "luau-errors-as-returns")]
+        {
+            ::ffi::lua_raiseerror($state);
+            return;
+        }
+        #[cfg(not(feature = "luau-errors-as-returns"))]
+        {
+            ::ffi::lua_error($state)
+        }
+    }};
+
+    ($state:expr, $ret:expr) => {{
+        #[cfg(feature = "luau-errors-as-returns")]
+        {
+            ::ffi::lua_raiseerror($state);
+            return $ret;
+        }
+        #[cfg(not(feature = "luau-errors-as-returns"))]
+        {
+            ::ffi::lua_error($state)
+        }
+    }};
+}
+
+macro_rules! propagate_error {
+    ($state:expr) => {
+        propagate_error!($state, ::ffi::LUA_RAISED)
+    };
+
+    ($state:expr, ()) => {
+        #[cfg(feature = "luau-errors-as-returns")]
+        {
+            if ::ffi::lua_haserror($state) != 0 {
+                return;
+            }
+        }
+    };
+
+    ($state:expr, $ret:expr) => {
+        #[cfg(feature = "luau-errors-as-returns")]
+        {
+            if ::ffi::lua_haserror($state) != 0 {
+                return $ret;
+            }
+        }
+    };
+}
+
 macro_rules! mlua_panic {
     ($msg:expr) => {
         panic!(bug_msg!($msg))
@@ -114,6 +168,7 @@ macro_rules! protect_lua {
         use ::std::os::raw::c_int;
         unsafe extern "C-unwind" fn do_call($state_inner: *mut ffi::lua_State) -> c_int {
             $code;
+            propagate_error!($state_inner);
             let nresults = $nresults;
             if nresults == ::ffi::LUA_MULTRET {
                 ffi::lua_gettop($state_inner)
@@ -135,7 +190,8 @@ macro_rules! protect_lua_mem {
         if $protect {
             protect_lua!(state, $nargs, $nresults, f)
         } else {
-            crate::Result::Ok(f(state))
+            let r = f(state);
+            crate::util::check_pending_error(state).map(|_| r)
         }
     }};
 
@@ -146,7 +202,7 @@ macro_rules! protect_lua_mem {
         } else {
             let $state_inner = state;
             $code;
-            crate::Result::Ok(())
+            crate::util::check_pending_error(state)
         }
     }};
 

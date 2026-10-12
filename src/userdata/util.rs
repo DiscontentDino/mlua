@@ -274,7 +274,7 @@ pub(crate) unsafe fn init_userdata_metatable(
 }
 
 unsafe extern "C-unwind" fn lua_error_impl(state: *mut ffi::lua_State) -> c_int {
-    ffi::lua_error(state);
+    raise_error!(state)
 }
 
 unsafe extern "C-unwind" fn lua_isfunction_impl(state: *mut ffi::lua_State) -> c_int {
@@ -337,12 +337,17 @@ unsafe fn init_userdata_metatable_index(state: *mut ffi::lua_State) -> Result<()
     protect_lua!(state, 0, 1, |state| {
         let ret = ffi::luaL_loadbuffer(state, code.as_ptr(), code.count_bytes(), cstr!("=__mlua_index"));
         if ret != ffi::LUA_OK {
-            ffi::lua_error(state);
+            raise_error!(state, ());
         }
+        propagate_error!(state, ());
         ffi::lua_pushcfunction(state, lua_error_impl);
+        propagate_error!(state, ());
         ffi::lua_pushcfunction(state, lua_isfunction_impl);
+        propagate_error!(state, ());
         ffi::lua_pushcfunction(state, lua_istable_impl);
+        propagate_error!(state, ());
         ffi::lua_call(state, 3, 1);
+        propagate_error!(state, ());
 
         #[cfg(feature = "luau-jit")]
         if ffi::luau_codegen_supported() != 0 {
@@ -350,6 +355,7 @@ unsafe fn init_userdata_metatable_index(state: *mut ffi::lua_State) -> Result<()
         }
 
         // Store in the registry
+        propagate_error!(state, ());
         ffi::lua_pushvalue(state, -1);
         ffi::lua_rawsetp(state, ffi::LUA_REGISTRYINDEX, index_key);
     })
@@ -389,11 +395,15 @@ unsafe fn init_userdata_metatable_newindex(state: *mut ffi::lua_State) -> Result
         let code_len = code.count_bytes();
         let ret = ffi::luaL_loadbuffer(state, code.as_ptr(), code_len, cstr!("=__mlua_newindex"));
         if ret != ffi::LUA_OK {
-            ffi::lua_error(state);
+            raise_error!(state, ());
         }
+        propagate_error!(state, ());
         ffi::lua_pushcfunction(state, lua_error_impl);
+        propagate_error!(state, ());
         ffi::lua_pushcfunction(state, lua_isfunction_impl);
+        propagate_error!(state, ());
         ffi::lua_call(state, 2, 1);
+        propagate_error!(state, ());
 
         #[cfg(feature = "luau-jit")]
         if ffi::luau_codegen_supported() != 0 {
@@ -401,6 +411,7 @@ unsafe fn init_userdata_metatable_newindex(state: *mut ffi::lua_State) -> Result
         }
 
         // Store in the registry
+        propagate_error!(state, ());
         ffi::lua_pushvalue(state, -1);
         ffi::lua_rawsetp(state, ffi::LUA_REGISTRYINDEX, newindex_key);
     })
@@ -415,14 +426,14 @@ unsafe fn push_userdata_metatable_namecall(
     unsafe extern "C-unwind" fn namecall(state: *mut ffi::lua_State) -> c_int {
         let name = ffi::lua_namecallatom(state, ptr::null_mut());
         if name.is_null() {
-            ffi::luaL_error(state, cstr!("attempt to call an unknown method"));
+            return ffi::luaL_raiseerror(state, cstr!("attempt to call an unknown method"));
         }
         let name_cs = std::ffi::CStr::from_ptr(name);
         let methods_map = get_userdata::<FxHashMap<Vec<u8>, CallbackPtr>>(state, ffi::lua_upvalueindex(1));
         let callback_ptr = match (*methods_map).get(name_cs.to_bytes()) {
             Some(ptr) => *ptr,
             #[rustfmt::skip]
-            None => ffi::luaL_error(state, cstr!("attempt to call an unknown method '%s'"), name),
+            None => return ffi::luaL_raiseerror(state, cstr!("attempt to call an unknown method '%s'"), name),
         };
         crate::state::callback_error_ext(state, ptr::null_mut(), true, |extra, nargs| {
             let rawlua = (*extra).raw_lua();

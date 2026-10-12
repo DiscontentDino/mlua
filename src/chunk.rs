@@ -146,7 +146,7 @@ pub struct Chunk<'a> {
     pub(crate) env: Result<Option<Table>>,
     pub(crate) mode: Option<ChunkMode>,
     pub(crate) source: IoResult<Cow<'a, [u8]>>,
-    #[cfg(feature = "luau")]
+    #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
     pub(crate) compiler: Option<Compiler>,
 }
 
@@ -158,7 +158,7 @@ pub enum ChunkMode {
 }
 
 /// Represents a constant value that can be used by Luau compiler.
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 #[cfg_attr(docsrs, doc(cfg(feature = "luau")))]
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -170,39 +170,39 @@ pub enum CompileConstant {
     String(String),
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl From<bool> for CompileConstant {
     fn from(b: bool) -> Self {
         CompileConstant::Boolean(b)
     }
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl From<crate::Number> for CompileConstant {
     fn from(n: crate::Number) -> Self {
         CompileConstant::Number(n)
     }
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl From<crate::Vector> for CompileConstant {
     fn from(v: crate::Vector) -> Self {
         CompileConstant::Vector(v)
     }
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl From<&str> for CompileConstant {
     fn from(s: &str) -> Self {
         CompileConstant::String(s.to_owned())
     }
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 type LibraryMemberConstantMap = HashMap<(String, String), CompileConstant>;
 
 /// Luau compiler
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 #[cfg_attr(docsrs, doc(cfg(feature = "luau")))]
 #[derive(Clone, Debug)]
 pub struct Compiler {
@@ -220,14 +220,14 @@ pub struct Compiler {
     disabled_builtins: Vec<String>,
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl Default for Compiler {
     fn default() -> Self {
         const { Self::new() }
     }
 }
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 impl Compiler {
     /// Creates Luau compiler instance with default options
     pub const fn new() -> Self {
@@ -560,7 +560,7 @@ impl Chunk<'_> {
     /// Sets or overwrites a Luau compiler used for this chunk.
     ///
     /// See [`Compiler`] for details and possible options.
-    #[cfg(any(feature = "luau", doc))]
+    #[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
     #[cfg_attr(docsrs, doc(cfg(feature = "luau")))]
     pub fn set_compiler(mut self, compiler: Compiler) -> Self {
         self.compiler = Some(compiler);
@@ -648,9 +648,9 @@ impl Chunk<'_> {
     /// Load this chunk into a regular [`Function`].
     ///
     /// This simply compiles the chunk without actually executing it.
-    #[cfg_attr(not(feature = "luau"), allow(unused_mut))]
+    #[cfg_attr(any(not(feature = "luau"), feature = "luau-no-compiler"), allow(unused_mut))]
     pub fn into_function(mut self) -> Result<Function> {
-        #[cfg(feature = "luau")]
+        #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
         if self.compiler.is_some() {
             // We don't need to compile source if no compiler set
             self.compile();
@@ -669,11 +669,13 @@ impl Chunk<'_> {
         if let Ok(ref source) = self.source
             && self.detect_mode() == ChunkMode::Text
         {
-            #[cfg(feature = "luau")]
+            #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
             if let Ok(data) = self.compiler.get_or_insert_default().compile(source) {
                 self.source = Ok(Cow::Owned(data));
                 self.mode = Some(ChunkMode::Binary);
             }
+            #[cfg(feature = "luau-no-compiler")]
+            let _ = source;
             #[cfg(not(feature = "luau"))]
             if let Ok(name) = Self::convert_name(self.name.clone())
                 && let Ok(func) = (self.lua.lock()).load_chunk(Some(&name), None, None, source.as_ref())
@@ -733,7 +735,7 @@ impl Chunk<'_> {
         let source = source.map_err(Error::runtime)?;
         let source = Self::expression_source(source);
         // We don't need to compile source if no compiler options set
-        #[cfg(feature = "luau")]
+        #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
         let source = self
             .compiler
             .as_ref()

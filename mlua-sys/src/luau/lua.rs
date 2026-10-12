@@ -316,8 +316,13 @@ unsafe extern "C-unwind" {
 //
 // Miscellaneous functions
 //
+pub const LUA_RAISED: c_int = -1;
+
 unsafe extern "C-unwind" {
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn lua_error(L: *mut lua_State) -> !;
+    pub fn lua_raiseerror(L: *mut lua_State) -> c_int;
+    pub fn lua_haserror(L: *mut lua_State) -> c_int;
     pub fn lua_next(L: *mut lua_State, idx: c_int) -> c_int;
     pub fn lua_rawiter(L: *mut lua_State, idx: c_int, iter: c_int) -> c_int;
     pub fn lua_concat(L: *mut lua_State, n: c_int);

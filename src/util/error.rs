@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::error::{Error, Result};
 use crate::memory::MemoryState;
+use crate::state::RaisedReturn;
 use crate::util::{
     DESTRUCTED_USERDATA_METATABLE, TypeKey, check_stack, get_internal_userdata, init_internal_metatable,
     push_internal_userdata, push_string, push_table, rawset_field, to_string,
@@ -31,7 +32,13 @@ impl TypeKey for WrappedFailure {
 impl WrappedFailure {
     pub(crate) unsafe fn new_userdata(state: *mut ffi::lua_State) -> *mut Self {
         // Unprotected calls always return `Ok`
-        push_internal_userdata(state, WrappedFailure::None, false).unwrap()
+        match push_internal_userdata(state, WrappedFailure::None, false) {
+            Ok(ud) => ud,
+            #[cfg(feature = "luau-errors-as-returns")]
+            Err(_) => ptr::null_mut(),
+            #[cfg(not(feature = "luau-errors-as-returns"))]
+            Err(_) => unreachable!(),
+        }
     }
 }
 
@@ -49,6 +56,7 @@ impl WrappedFailure {
 unsafe fn callback_error<F, R>(state: *mut ffi::lua_State, f: F) -> R
 where
     F: FnOnce(c_int) -> Result<R>,
+    R: RaisedReturn,
 {
     let nargs = ffi::lua_gettop(state);
 
@@ -59,10 +67,12 @@ where
         extra_stack,
         cstr!("not enough stack space for callback error handling"),
     );
+    propagate_error!(state, R::raised());
 
     // We cannot shadow Rust errors with Lua ones, we pre-allocate enough memory
     // to store a wrapped error or panic *before* we proceed.
     let ud = WrappedFailure::new_userdata(state);
+    propagate_error!(state, R::raised());
     ffi::lua_rotate(state, 1, 1);
 
     match catch_unwind(AssertUnwindSafe(|| f(nargs))) {
@@ -71,6 +81,11 @@ where
             r
         }
         Ok(Err(err)) => {
+            #[cfg(feature = "luau-errors-as-returns")]
+            if ffi::lua_haserror(state) != 0 {
+                drop(err);
+                return R::raised();
+            }
             ffi::lua_settop(state, 1);
 
             // Store the error before traceback generation can fail or run GC.
@@ -93,12 +108,17 @@ where
                 };
             }
             ffi::lua_settop(state, 1);
-            ffi::lua_error(state)
+            raise_error!(state, R::raised())
         }
         Err(p) => {
+            #[cfg(feature = "luau-errors-as-returns")]
+            mlua_assert!(
+                ffi::lua_haserror(state) == 0,
+                "panic while a Lua error is pending"
+            );
             ffi::lua_settop(state, 1);
             ptr::write(ud, WrappedFailure::Panic(Some(p)));
-            ffi::lua_error(state)
+            raise_error!(state, R::raised())
         }
     }
 }
@@ -280,6 +300,7 @@ where
 
         let f = (*params).function.take().unwrap();
         (*params).result.write(f(state));
+        propagate_error!(state);
 
         if (*params).nresults == ffi::LUA_MULTRET {
             ffi::lua_gettop(state)
@@ -330,6 +351,7 @@ pub(crate) unsafe extern "C-unwind" fn error_traceback(state: *mut ffi::lua_Stat
 
     if get_internal_userdata::<WrappedFailure>(state, -1, ptr::null()).is_null() {
         let s = ffi::luaL_tolstring(state, -1, ptr::null_mut());
+        propagate_error!(state);
         if ffi::lua_checkstack(state, ffi::LUA_TRACEBACK_STACK) != 0 {
             ffi::luaL_traceback(state, state, s, 0);
             ffi::lua_remove(state, -2);
@@ -346,6 +368,7 @@ pub(crate) unsafe fn error_traceback_thread(state: *mut ffi::lua_State, thread: 
 
     if get_internal_userdata::<WrappedFailure>(state, -1, ptr::null()).is_null() {
         let s = ffi::luaL_tolstring(state, -1, ptr::null_mut());
+        propagate_error!(state, ());
         if ffi::lua_checkstack(state, ffi::LUA_TRACEBACK_STACK) != 0 {
             ffi::luaL_traceback(state, thread, s, 0);
             ffi::lua_remove(state, -2);

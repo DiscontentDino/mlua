@@ -316,7 +316,11 @@ impl Table {
             }
             protect_lua!(state, 2, 0, fn(state) {
                 let len = ffi::luaL_len(state, -2) as Integer;
+                propagate_error!(state);
                 if len == Integer::MAX {
+                    #[cfg(feature = "luau-errors-as-returns")]
+                    return ffi::luaL_raiseerror(state, cstr!("table length overflow"));
+                    #[cfg(not(feature = "luau-errors-as-returns"))]
                     ffi::luaL_error(state, cstr!("table length overflow"));
                 }
                 ffi::lua_seti(state, -2, len + 1);
@@ -343,10 +347,12 @@ impl Table {
             lua.push_ref(&self.0);
             protect_lua!(state, 1, 1, fn(state) {
                 let len = ffi::luaL_len(state, -1) as Integer;
+                propagate_error!(state);
                 if len == 0 {
                     ffi::lua_pushnil(state);
                 } else {
                     ffi::lua_geti(state, -1, len);
+                    propagate_error!(state);
                     ffi::lua_pushnil(state);
                     ffi::lua_seti(state, -3, len);
                 }
@@ -393,7 +399,9 @@ impl Table {
                         for i in idx..size {
                             // table[i] = table[i+1]
                             ffi::lua_geti(state, -1, i + 1);
+                            propagate_error!(state, ());
                             ffi::lua_seti(state, -2, i);
+                            propagate_error!(state, ());
                         }
                         ffi::lua_pushnil(state);
                         ffi::lua_seti(state, -2, size);
@@ -525,6 +533,7 @@ impl Table {
                     // table[i+1] = table[i]
                     ffi::lua_rawgeti(state, -2, i);
                     ffi::lua_rawseti(state, -3, i + 1);
+                    propagate_error!(state, ());
                 }
                 ffi::lua_rawseti(state, -2, idx)
             })
@@ -604,6 +613,7 @@ impl Table {
                         for i in idx..size {
                             ffi::lua_rawgeti(state, -1, i + 1);
                             ffi::lua_rawseti(state, -2, i);
+                            propagate_error!(state, ());
                         }
                         ffi::lua_pushnil(state);
                         ffi::lua_rawseti(state, -2, size);

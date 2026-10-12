@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use std::mem;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use std::os::raw::c_char;
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use crate::state::ExtraData;
 
-use super::json::{self, Json};
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use super::json;
+use super::json::Json;
 
 /// Represents a heap dump of a Luau memory state.
 #[cfg(any(feature = "luau", doc))]
@@ -17,6 +22,12 @@ pub struct HeapDump {
 
 impl HeapDump {
     /// Dumps the current Lua heap state.
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    pub(crate) unsafe fn new(_state: *mut ffi::lua_State) -> Option<Self> {
+        None
+    }
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     pub(crate) unsafe fn new(state: *mut ffi::lua_State) -> Option<Self> {
         unsafe extern "C" fn category_name(state: *mut ffi::lua_State, cat: u8) -> *const c_char {
             (&*ExtraData::get(state))

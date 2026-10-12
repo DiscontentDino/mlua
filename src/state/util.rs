@@ -22,6 +22,95 @@ impl Drop for StateGuard<'_> {
     }
 }
 
+pub(crate) trait RaisedReturn {
+    fn raised() -> Self;
+}
+
+#[cfg(not(feature = "luau-errors-as-returns"))]
+impl<T> RaisedReturn for T {
+    #[inline(always)]
+    fn raised() -> Self {
+        unreachable!("errors are raised by unwinding")
+    }
+}
+
+#[cfg(feature = "luau-errors-as-returns")]
+mod raised_return {
+    use super::RaisedReturn;
+    use std::os::raw::c_int;
+
+    impl RaisedReturn for c_int {
+        #[inline(always)]
+        fn raised() -> Self {
+            ffi::LUA_RAISED
+        }
+    }
+
+    impl RaisedReturn for () {
+        #[inline(always)]
+        fn raised() -> Self {}
+    }
+
+    impl RaisedReturn for bool {
+        #[inline(always)]
+        fn raised() -> Self {
+            false
+        }
+    }
+
+    impl<T> RaisedReturn for Option<T> {
+        #[inline(always)]
+        fn raised() -> Self {
+            None
+        }
+    }
+
+    impl<T> RaisedReturn for Vec<T> {
+        #[inline(always)]
+        fn raised() -> Self {
+            Vec::new()
+        }
+    }
+
+    impl RaisedReturn for String {
+        #[inline(always)]
+        fn raised() -> Self {
+            String::new()
+        }
+    }
+
+    impl RaisedReturn for crate::types::VmState {
+        #[inline(always)]
+        fn raised() -> Self {
+            crate::types::VmState::Continue
+        }
+    }
+
+    #[cfg(not(feature = "luau-no-compiler"))]
+    impl RaisedReturn for ffi::luarequire_NavigateResult {
+        #[inline(always)]
+        fn raised() -> Self {
+            ffi::luarequire_NavigateResult::NotFound
+        }
+    }
+
+    #[cfg(not(feature = "luau-no-compiler"))]
+    impl RaisedReturn for ffi::luarequire_WriteResult {
+        #[inline(always)]
+        fn raised() -> Self {
+            ffi::luarequire_WriteResult::Failure
+        }
+    }
+
+    #[cfg(not(feature = "luau-no-compiler"))]
+    impl RaisedReturn for ffi::luarequire_ConfigStatus {
+        #[inline(always)]
+        fn raised() -> Self {
+            ffi::luarequire_ConfigStatus::Absent
+        }
+    }
+}
+
 // An optimized version of `callback_error` that does not allocate `WrappedFailure` userdata
 // and instead reuses unused values from previous calls (or allocates new).
 pub(crate) unsafe fn callback_error_ext<F, R>(
@@ -32,6 +121,7 @@ pub(crate) unsafe fn callback_error_ext<F, R>(
 ) -> R
 where
     F: FnOnce(*mut ExtraData, c_int) -> Result<R>,
+    R: RaisedReturn,
 {
     if extra.is_null() {
         extra = ExtraData::get(state);
@@ -46,10 +136,10 @@ where
 
     impl PreallocatedFailure {
         #[inline(always)]
-        unsafe fn reserve(state: *mut ffi::lua_State, extra: *mut ExtraData) -> Self {
+        unsafe fn reserve(state: *mut ffi::lua_State, extra: *mut ExtraData) -> Option<Self> {
             if (*extra).wrapped_failure_top > 0 {
                 (*extra).wrapped_failure_top -= 1;
-                return PreallocatedFailure::Reserved;
+                return Some(PreallocatedFailure::Reserved);
             }
 
             Self::reserve_new(state)
@@ -57,16 +147,18 @@ where
 
         #[cold]
         #[inline(never)]
-        unsafe fn reserve_new(state: *mut ffi::lua_State) -> Self {
+        unsafe fn reserve_new(state: *mut ffi::lua_State) -> Option<Self> {
             // We need to check stack for Luau in case when callback is called from interrupt
             // See https://github.com/luau-lang/luau/issues/446 and mlua #142 and #153
             #[cfg(feature = "luau")]
             ffi::lua_rawcheckstack(state, 2);
+            propagate_error!(state, None);
             // Place it to the beginning of the stack
             let ud = WrappedFailure::new_userdata(state);
-            ffi::lua_insert(state, 1);
             // Lua raises an error on allocation failure instead of returning null
-            PreallocatedFailure::New(NonNull::new_unchecked(ud))
+            let ud = NonNull::new(ud)?;
+            ffi::lua_insert(state, 1);
+            Some(PreallocatedFailure::New(ud))
         }
 
         #[cold]
@@ -82,6 +174,8 @@ where
                     ffi::lua_settop(state, 0);
                     #[cfg(feature = "luau")]
                     ffi::lua_rawcheckstack(state, 2);
+                    #[cfg(feature = "luau-errors-as-returns")]
+                    mlua_assert!(ffi::lua_haserror(state) == 0, "cannot grow stack for error");
                     ffi::lua_xpush(ref_thread, state, index);
                     ffi::lua_pushnil(ref_thread);
                     ffi::lua_replace(ref_thread, index);
@@ -114,7 +208,9 @@ where
 
     // We cannot shadow Rust errors with Lua ones, so we need to reserve pre-allocated memory
     // to store a wrapped failure (error or panic) *before* we proceed.
-    let prealloc_failure = PreallocatedFailure::reserve(state, extra);
+    let Some(prealloc_failure) = PreallocatedFailure::reserve(state, extra) else {
+        return R::raised();
+    };
 
     // Keep the Error payload out of catch_unwind return value
     let mut callback_error = None;
@@ -136,6 +232,11 @@ where
         }
         Ok(None) => {
             let mut err = callback_error.take().unwrap();
+            #[cfg(feature = "luau-errors-as-returns")]
+            if ffi::lua_haserror(state) != 0 {
+                drop(err);
+                return R::raised();
+            }
             let wrapped_error = prealloc_failure.r#use(state, extra);
             if wrap_error {
                 err = Error::CallbackError {
@@ -171,14 +272,19 @@ where
             }
 
             ffi::lua_settop(state, 1);
-            ffi::lua_error(state)
+            raise_error!(state, R::raised())
         }
         Err(p) => {
+            #[cfg(feature = "luau-errors-as-returns")]
+            mlua_assert!(
+                ffi::lua_haserror(state) == 0,
+                "panic while a Lua error is pending"
+            );
             let wrapped_panic = prealloc_failure.r#use(state, extra);
             ptr::write(wrapped_panic, WrappedFailure::Panic(Some(p)));
             get_internal_metatable::<WrappedFailure>(state);
             ffi::lua_setmetatable(state, -2);
-            ffi::lua_error(state)
+            raise_error!(state, R::raised())
         }
     }
 }

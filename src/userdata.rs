@@ -828,7 +828,9 @@ impl AnyUserData {
 
             lua.push_userdata_ref(&self.0)?;
             protect_lua!(state, 1, 1, fn(state) {
-                if ffi::luaL_getmetafield(state, 1, cstr!("__gc")) != ffi::LUA_TNIL {
+                let gc = ffi::luaL_getmetafield(state, 1, cstr!("__gc"));
+                propagate_error!(state);
+                if gc != ffi::LUA_TNIL {
                     ffi::lua_pushvalue(state, 1);
                     // Only explicit destruction may propagate panics
                     ffi::lua_pushboolean(state, 1);
@@ -892,12 +894,16 @@ impl AnyUserData {
 
             // Multiple (extra) user values are emulated by storing them in a table
             protect_lua!(state, 2, 0, |state| {
-                if ffi::lua_getuservalue(state, -2) != ffi::LUA_TTABLE {
+                let t = ffi::lua_getuservalue(state, -2);
+                propagate_error!(state, ());
+                if t != ffi::LUA_TTABLE {
                     // Create a new table to use as uservalue
                     ffi::lua_pop(state, 1);
                     ffi::lua_newtable(state);
+                    propagate_error!(state, ());
                     ffi::lua_pushvalue(state, -1);
                     ffi::lua_setuservalue(state, -4);
+                    propagate_error!(state, ());
                 }
                 ffi::lua_pushvalue(state, -2);
                 ffi::lua_rawseti(state, -2, n as ffi::lua_Integer);
@@ -954,14 +960,19 @@ impl AnyUserData {
 
             // Multiple (extra) user values are emulated by storing them in a table
             protect_lua!(state, 2, 0, |state| {
-                if ffi::lua_getuservalue(state, -2) != ffi::LUA_TTABLE {
+                let t = ffi::lua_getuservalue(state, -2);
+                propagate_error!(state, ());
+                if t != ffi::LUA_TTABLE {
                     // Create a new table to use as uservalue
                     ffi::lua_pop(state, 1);
                     ffi::lua_newtable(state);
+                    propagate_error!(state, ());
                     ffi::lua_pushvalue(state, -1);
                     ffi::lua_setuservalue(state, -4);
+                    propagate_error!(state, ());
                 }
                 ffi::lua_pushlstring(state, name.as_ptr() as *const c_char, name.len());
+                propagate_error!(state, ());
                 ffi::lua_pushvalue(state, -3);
                 ffi::lua_rawset(state, -3);
             })?;
@@ -1108,7 +1119,9 @@ impl AnyUserData {
             // Try `__todebugstring` metamethod first, then `__tostring`
             #[allow(clippy::collapsible_if)]
             if ffi::luaL_callmeta(state, -1, cstr!("__todebugstring")) == 0 {
+                propagate_error!(state);
                 if ffi::luaL_callmeta(state, -1, cstr!("__tostring")) == 0 {
+                    propagate_error!(state);
                     ffi::lua_pushnil(state);
                 }
             }

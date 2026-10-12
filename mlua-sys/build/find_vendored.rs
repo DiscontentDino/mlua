@@ -26,6 +26,8 @@ pub fn probe_lua() {
         .enable_codegen(cfg!(feature = "luau-codegen"))
         .set_max_cstack_size(1000000)
         .set_vector_size(if cfg!(feature = "luau-vector4") { 4 } else { 3 })
+        .errors_as_returns(cfg!(feature = "luau-errors-as-returns"))
+        .enable_compiler(!cfg!(feature = "luau-no-compiler"))
         .build();
 
     artifacts.print_cargo_metadata();

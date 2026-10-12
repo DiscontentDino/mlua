@@ -8,6 +8,9 @@ use super::lua::{self, LUA_REGISTRYINDEX, lua_CFunction, lua_Number, lua_State, 
 // Key, in the registry, for table of loaded modules
 pub const LUA_LOADED_TABLE: *const c_char = cstr!("_LOADED");
 
+#[cfg(feature = "luau-no-compiler")]
+pub const LUA_REGISTERED_MODULES_TABLE: *const c_char = cstr!("_REGISTEREDMODULES");
+
 #[repr(C)]
 pub struct luaL_Reg {
     pub name: *const c_char,
@@ -19,52 +22,76 @@ unsafe extern "C-unwind" {
     #[link_name = "luaL_getmetafield"]
     pub fn luaL_getmetafield_(L: *mut lua_State, obj: c_int, e: *const c_char) -> c_int;
     pub fn luaL_callmeta(L: *mut lua_State, obj: c_int, e: *const c_char) -> c_int;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_typeerrorL"]
     pub fn luaL_typeerror(L: *mut lua_State, narg: c_int, tname: *const c_char) -> !;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_argerrorL"]
     pub fn luaL_argerror(L: *mut lua_State, narg: c_int, extramsg: *const c_char) -> !;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checklstring(L: *mut lua_State, narg: c_int, l: *mut usize) -> *const c_char;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optlstring(
         L: *mut lua_State,
         narg: c_int,
         def: *const c_char,
         l: *mut usize,
     ) -> *const c_char;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checknumber(L: *mut lua_State, narg: c_int) -> lua_Number;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optnumber(L: *mut lua_State, narg: c_int, def: lua_Number) -> lua_Number;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkboolean(L: *mut lua_State, narg: c_int) -> c_int;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optboolean(L: *mut lua_State, narg: c_int, def: c_int) -> c_int;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_checkinteger"]
     pub fn luaL_checkinteger_(L: *mut lua_State, narg: c_int) -> c_int;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkinteger64(L: *mut lua_State, narg: c_int) -> i64;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_optinteger"]
     pub fn luaL_optinteger_(L: *mut lua_State, narg: c_int, def: c_int) -> c_int;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optinteger64(L: *mut lua_State, narg: c_int, def: i64) -> i64;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkunsigned(L: *mut lua_State, narg: c_int) -> lua_Unsigned;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optunsigned(L: *mut lua_State, narg: c_int, def: lua_Unsigned) -> lua_Unsigned;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkvector(L: *mut lua_State, narg: c_int) -> *const c_float;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_optvector(L: *mut lua_State, narg: c_int, def: *const c_float) -> *const c_float;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_checkstack"]
     pub fn luaL_checkstack_(L: *mut lua_State, sz: c_int, msg: *const c_char);
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checktype(L: *mut lua_State, narg: c_int, t: c_int);
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkany(L: *mut lua_State, narg: c_int);
 
     #[link_name = "luaL_newmetatable"]
     pub fn luaL_newmetatable_(L: *mut lua_State, tname: *const c_char) -> c_int;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkudata(L: *mut lua_State, ud: c_int, tname: *const c_char) -> *mut c_void;
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkudatatagged(L: *mut lua_State, ud: c_int, tag: c_int) -> *mut c_void;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkbuffer(L: *mut lua_State, narg: c_int, len: *mut usize) -> *mut c_void;
 
     pub fn luaL_where(L: *mut lua_State, lvl: c_int);
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     #[link_name = "luaL_errorL"]
     pub fn luaL_error(L: *mut lua_State, fmt: *const c_char, ...) -> !;
 
+    #[cfg(not(feature = "luau-errors-as-returns"))]
     pub fn luaL_checkoption(
         L: *mut lua_State,
         narg: c_int,
@@ -95,10 +122,93 @@ unsafe extern "C-unwind" {
     pub fn luaL_sandboxthread(L: *mut lua_State);
 }
 
+unsafe extern "C-unwind" {
+    #[link_name = "luaL_raiseerrorL"]
+    pub fn luaL_raiseerror(L: *mut lua_State, fmt: *const c_char, ...) -> c_int;
+    #[link_name = "luaL_raisetypeerrorL"]
+    pub fn luaL_raisetypeerror(L: *mut lua_State, narg: c_int, tname: *const c_char) -> c_int;
+    #[link_name = "luaL_raiseargerrorL"]
+    pub fn luaL_raiseargerror(L: *mut lua_State, narg: c_int, extramsg: *const c_char) -> c_int;
+
+    pub fn luaL_requirelstring(
+        L: *mut lua_State,
+        narg: c_int,
+        out: *mut *const c_char,
+        len: *mut usize,
+    ) -> c_int;
+    pub fn luaL_requireoptlstring(
+        L: *mut lua_State,
+        narg: c_int,
+        def: *const c_char,
+        out: *mut *const c_char,
+        len: *mut usize,
+    ) -> c_int;
+    pub fn luaL_requirenumber(L: *mut lua_State, narg: c_int, out: *mut lua_Number) -> c_int;
+    pub fn luaL_requireoptnumber(
+        L: *mut lua_State,
+        narg: c_int,
+        def: lua_Number,
+        out: *mut lua_Number,
+    ) -> c_int;
+
+    pub fn luaL_requireboolean(L: *mut lua_State, narg: c_int, out: *mut c_int) -> c_int;
+    pub fn luaL_requireoptboolean(L: *mut lua_State, narg: c_int, def: c_int, out: *mut c_int) -> c_int;
+
+    #[link_name = "luaL_requireinteger"]
+    pub fn luaL_requireinteger_(L: *mut lua_State, narg: c_int, out: *mut c_int) -> c_int;
+    pub fn luaL_requireinteger64(L: *mut lua_State, narg: c_int, out: *mut i64) -> c_int;
+    #[link_name = "luaL_requireoptinteger"]
+    pub fn luaL_requireoptinteger_(L: *mut lua_State, narg: c_int, def: c_int, out: *mut c_int) -> c_int;
+    pub fn luaL_requireoptinteger64(L: *mut lua_State, narg: c_int, def: i64, out: *mut i64) -> c_int;
+    pub fn luaL_requireunsigned(L: *mut lua_State, narg: c_int, out: *mut lua_Unsigned) -> c_int;
+    pub fn luaL_requireoptunsigned(
+        L: *mut lua_State,
+        narg: c_int,
+        def: lua_Unsigned,
+        out: *mut lua_Unsigned,
+    ) -> c_int;
+
+    pub fn luaL_requirevector(L: *mut lua_State, narg: c_int, out: *mut *const c_float) -> c_int;
+    pub fn luaL_requireoptvector(
+        L: *mut lua_State,
+        narg: c_int,
+        def: *const c_float,
+        out: *mut *const c_float,
+    ) -> c_int;
+
+    pub fn luaL_requirestack(L: *mut lua_State, sz: c_int, msg: *const c_char) -> c_int;
+    pub fn luaL_requiretype(L: *mut lua_State, narg: c_int, t: c_int) -> c_int;
+    pub fn luaL_requireany(L: *mut lua_State, narg: c_int) -> c_int;
+
+    pub fn luaL_requireudata(
+        L: *mut lua_State,
+        ud: c_int,
+        tname: *const c_char,
+        out: *mut *mut c_void,
+    ) -> c_int;
+    pub fn luaL_requireudatatagged(L: *mut lua_State, ud: c_int, tag: c_int, out: *mut *mut c_void) -> c_int;
+
+    pub fn luaL_requirebuffer(
+        L: *mut lua_State,
+        narg: c_int,
+        out: *mut *mut c_void,
+        len: *mut usize,
+    ) -> c_int;
+
+    pub fn luaL_requireoption(
+        L: *mut lua_State,
+        narg: c_int,
+        def: *const c_char,
+        lst: *const *const c_char,
+        out: *mut c_int,
+    ) -> c_int;
+}
+
 //
 // Some useful macros (implemented as Rust functions)
 //
 
+#[cfg(not(feature = "luau-errors-as-returns"))]
 #[inline(always)]
 pub unsafe fn luaL_argcheck(L: *mut lua_State, cond: c_int, arg: c_int, extramsg: *const c_char) {
     if cond == 0 {
@@ -106,6 +216,7 @@ pub unsafe fn luaL_argcheck(L: *mut lua_State, cond: c_int, arg: c_int, extramsg
     }
 }
 
+#[cfg(not(feature = "luau-errors-as-returns"))]
 #[inline(always)]
 pub unsafe fn luaL_argexpected(L: *mut lua_State, cond: c_int, arg: c_int, tname: *const c_char) {
     if cond == 0 {
@@ -113,14 +224,31 @@ pub unsafe fn luaL_argexpected(L: *mut lua_State, cond: c_int, arg: c_int, tname
     }
 }
 
+#[cfg(not(feature = "luau-errors-as-returns"))]
 #[inline(always)]
 pub unsafe fn luaL_checkstring(L: *mut lua_State, n: c_int) -> *const c_char {
     luaL_checklstring(L, n, ptr::null_mut())
 }
 
+#[cfg(not(feature = "luau-errors-as-returns"))]
 #[inline(always)]
 pub unsafe fn luaL_optstring(L: *mut lua_State, n: c_int, d: *const c_char) -> *const c_char {
     luaL_optlstring(L, n, d, ptr::null_mut())
+}
+
+#[inline(always)]
+pub unsafe fn luaL_requirestring(L: *mut lua_State, n: c_int, out: *mut *const c_char) -> c_int {
+    luaL_requirelstring(L, n, out, ptr::null_mut())
+}
+
+#[inline(always)]
+pub unsafe fn luaL_requireoptstring(
+    L: *mut lua_State,
+    n: c_int,
+    d: *const c_char,
+    out: *mut *const c_char,
+) -> c_int {
+    luaL_requireoptlstring(L, n, d, out, ptr::null_mut())
 }
 
 #[inline(always)]
@@ -177,9 +305,11 @@ pub unsafe fn luaL_sandbox(L: *mut lua_State, enabled: c_int) {
         }
         lua_pop(L, 1);
     }
+    propagate!(L);
 
     // set all builtin metatables to read-only
     lua_pushliteral(L, c"");
+    propagate!(L);
     if lua_getmetatable(L, -1) != 0 {
         lua_setreadonly(L, -1, enabled);
         lua_pop(L, 2);
@@ -225,6 +355,10 @@ unsafe extern "C-unwind" {
 pub unsafe fn luaL_addchar(B: *mut luaL_Strbuf, c: c_char) {
     if (*B).p >= (*B).end {
         luaL_prepbuffsize(B, 1);
+        #[cfg(feature = "luau-errors-as-returns")]
+        if (*B).p >= (*B).end {
+            return;
+        }
     }
     *(*B).p = c;
     (*B).p = (*B).p.add(1);

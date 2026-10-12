@@ -31,13 +31,15 @@ pub use crate::state::GcGenParams as LuaGcGenParams;
 #[cfg(any(feature = "luau", doc))]
 #[doc(no_inline)]
 pub use crate::{
-    Buffer as LuaBuffer, Vector as LuaVector,
+    Buffer as LuaBuffer, Vector as LuaVector, function::CoverageInfo as LuaCoverageInfo,
+    luau::HeapDump as LuaHeapDump,
+};
+
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
+#[doc(no_inline)]
+pub use crate::{
     chunk::{CompileConstant as LuaCompileConstant, Compiler as LuaCompiler},
-    function::CoverageInfo as LuaCoverageInfo,
-    luau::{
-        FsRequirer as LuaFsRequirer, HeapDump as LuaHeapDump, NavigateError as LuaNavigateError,
-        Require as LuaRequire,
-    },
+    luau::{FsRequirer as LuaFsRequirer, NavigateError as LuaNavigateError, Require as LuaRequire},
 };
 
 #[cfg(any(feature = "luau-jit", doc))]

@@ -18,7 +18,7 @@ use crate::types::{AppData, ReentrantMutex, ThreadEventCallback, XRc};
 use crate::userdata::RawUserDataRegistry;
 use crate::util::{TypeKey, WrappedFailure, get_internal_metatable, push_internal_userdata};
 
-#[cfg(any(feature = "luau", doc))]
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
 use crate::chunk::Compiler;
 
 #[cfg(feature = "async")]
@@ -98,7 +98,7 @@ pub(crate) struct ExtraData {
     pub(crate) running_gc: bool,
     #[cfg(feature = "luau")]
     pub(crate) sandboxed: bool,
-    #[cfg(feature = "luau")]
+    #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
     pub(super) compiler: Option<Compiler>,
     #[cfg(feature = "luau-jit")]
     pub(super) enable_jit: bool,
@@ -139,6 +139,7 @@ impl ExtraData {
         let ref_thread = mlua_expect!(
             protect_lua!(state, 0, 0, |state| {
                 let thread = ffi::lua_newthread(state);
+                propagate_error!(state, thread);
                 ffi::luaL_ref(state, ffi::LUA_REGISTRYINDEX);
                 thread
             }),
@@ -211,7 +212,7 @@ impl ExtraData {
             thread_event_state: ptr::null_mut(),
             #[cfg(feature = "luau")]
             sandboxed: false,
-            #[cfg(feature = "luau")]
+            #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
             compiler: None,
             #[cfg(feature = "luau-jit")]
             enable_jit: true,

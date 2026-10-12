@@ -1609,6 +1609,7 @@ impl RawLua {
         unsafe extern "C-unwind" fn unpack(state: *mut ffi::lua_State) -> c_int {
             let len = ffi::lua_tointeger(state, 2);
             ffi::luaL_checkstack(state, len as c_int, ptr::null());
+            propagate_error!(state);
             for i in 1..=len {
                 ffi::lua_rawgeti(state, 1, i);
             }

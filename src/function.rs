@@ -292,6 +292,7 @@ impl Function {
             let nargs = ffi::lua_gettop(state);
             let nbinds = ffi::lua_tointeger(state, ffi::lua_upvalueindex(1)) as c_int;
             ffi::luaL_checkstack(state, nbinds, ptr::null());
+            propagate_error!(state);
 
             for i in 0..nbinds {
                 ffi::lua_pushvalue(state, ffi::lua_upvalueindex(i + 2));

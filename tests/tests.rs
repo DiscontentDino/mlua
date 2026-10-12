@@ -1695,6 +1695,9 @@ fn test_exec_raw() -> Result<()> {
     // Test error handling
     let res: Result<()> = unsafe {
         lua.exec_raw("test error", |state| {
+            #[cfg(feature = "luau-errors-as-returns")]
+            ffi::lua_raiseerror(state);
+            #[cfg(not(feature = "luau-errors-as-returns"))]
             ffi::lua_error(state);
         })
     };

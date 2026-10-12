@@ -36,7 +36,9 @@ use crate::value::{Nil, Value};
 use crate::{debug::HookTriggers, types::HookKind};
 
 #[cfg(any(feature = "luau", doc))]
-use crate::{buffer::Buffer, chunk::Compiler};
+use crate::buffer::Buffer;
+#[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
+use crate::chunk::Compiler;
 
 #[cfg(feature = "async")]
 use {
@@ -51,7 +53,7 @@ use serde::Serialize;
 pub(crate) use extra::ExtraData;
 #[doc(hidden)]
 pub use raw::RawLua;
-pub(crate) use util::callback_error_ext;
+pub(crate) use util::{RaisedReturn, callback_error_ext};
 
 /// Top level Lua struct which represents an instance of Lua VM.
 pub struct Lua {
@@ -686,6 +688,7 @@ impl Lua {
                 protect_lua!(state, 0, 0, |state| {
                     if enabled {
                         ffi::luaL_sandbox(state, 1);
+                        propagate_error!(state, ());
                         ffi::luaL_sandboxthread(state);
                     } else {
                         // Restore original `LUA_GLOBALSINDEX`
@@ -857,6 +860,7 @@ impl Lua {
                 }
                 interrupt_cb((*extra).lua())
             });
+            propagate_error!(state, ());
             match result {
                 VmState::Continue => {}
                 VmState::Yield => {
@@ -1081,6 +1085,7 @@ impl Lua {
                     Some(s) => ffi::lua_pushlstring(state, s.as_ptr() as *const c_char, s.len()),
                     None => ptr::null(),
                 };
+                propagate_error!(state, ());
                 // `protect_lua` adds its own call frame, leave room for Lua's internal increment.
                 let level = level.saturating_add(1).min((c_int::MAX - 1) as usize) as c_int;
                 ffi::luaL_traceback(state, state, msg, level);
@@ -1304,7 +1309,7 @@ impl Lua {
     /// including via `require` function.
     ///
     /// See [`Compiler`] for details and possible options.
-    #[cfg(any(feature = "luau", doc))]
+    #[cfg(all(any(feature = "luau", doc), not(feature = "luau-no-compiler")))]
     #[cfg_attr(docsrs, doc(cfg(feature = "luau")))]
     pub fn set_compiler(&self, compiler: Compiler) {
         let lua = self.lock();
@@ -1382,7 +1387,7 @@ impl Lua {
             env: chunk.environment(self),
             mode: chunk.mode(),
             source: chunk.source(),
-            #[cfg(feature = "luau")]
+            #[cfg(all(feature = "luau", not(feature = "luau-no-compiler")))]
             compiler: unsafe { (*self.lock().extra.get()).compiler.clone() },
         }
     }

@@ -36,6 +36,8 @@ luajit52 = ["luajit", "ffi/luajit52"]
 luau = ["ffi/luau"]
 luau-jit = ["luau", "ffi/luau-codegen"]
 luau-vector4 = ["luau", "ffi/luau-vector4"]
+luau-errors-as-returns = ["luau", "ffi/luau-errors-as-returns"]
+luau-no-compiler = ["luau", "ffi/luau-no-compiler"]
 vendored = ["ffi/vendored"]
 module = ["mlua_derive", "ffi/module"]
 async = ["dep:futures-util"]
@@ -124,3 +126,6 @@ required-features = ["serde"]
 [[example]]
 name = "userdata"
 required-features = ["macros"]
+
+[patch.crates-io]
+luau0-src = { git = "https://github.com/DiscontentDino/luau-src-rs", branch = "errors-as-returns-vendored" }

@@ -231,10 +231,13 @@ pub(crate) unsafe fn init_metatables(state: *mut ffi::lua_State) -> Result<()> {
     check_stack(state, 2)?;
     protect_lua!(state, 0, 0, fn(state) {
         ffi::lua_createtable(state, 0, 1);
+        propagate_error!(state);
 
         ffi::lua_pushstring(state, cstr!("__metatable"));
+        propagate_error!(state);
         ffi::lua_pushboolean(state, 0);
         ffi::lua_rawset(state, -3);
+        propagate_error!(state);
 
         let array_metatable_key = &ARRAY_METATABLE_REGISTRY_KEY as *const u8 as *const c_void;
         ffi::lua_rawsetp(state, ffi::LUA_REGISTRYINDEX, array_metatable_key);

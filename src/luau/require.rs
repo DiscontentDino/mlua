@@ -158,7 +158,11 @@ macro_rules! try_borrow {
     ($state:expr, $ctx:expr) => {
         match (*($ctx as *const RefCell<Context>)).try_borrow() {
             Ok(ctx) => ctx,
-            Err(_) => ffi::luaL_error($state, cstr!("require context is already borrowed")),
+            Err(_) => {
+                ffi::luaL_raiseerror($state, cstr!("require context is already borrowed"));
+                #[allow(unreachable_code)]
+                return crate::state::RaisedReturn::raised();
+            }
         }
     };
 }
@@ -167,7 +171,11 @@ macro_rules! try_borrow_mut {
     ($state:expr, $ctx:expr) => {
         match (*($ctx as *const RefCell<Context>)).try_borrow_mut() {
             Ok(ctx) => ctx,
-            Err(_) => ffi::luaL_error($state, cstr!("require context is already borrowed")),
+            Err(_) => {
+                ffi::luaL_raiseerror($state, cstr!("require context is already borrowed"));
+                #[allow(unreachable_code)]
+                return crate::state::RaisedReturn::raised();
+            }
         }
     };
 }
@@ -296,6 +304,7 @@ pub(super) unsafe extern "C-unwind" fn init_config(config: *mut ffi::luarequire_
     ) -> WriteResult {
         let this = try_borrow!(state, ctx);
         let cache_key = callback_error_ext(state, ptr::null_mut(), true, move |_, _| Ok(this.cache_key()));
+        propagate_error!(state, WriteResult::Failure);
         write_to_buffer(buffer, buffer_size, size_out, cache_key.as_bytes())
     }
 
@@ -324,6 +333,7 @@ pub(super) unsafe extern "C-unwind" fn init_config(config: *mut ffi::luarequire_
         let config = callback_error_ext(state, ptr::null_mut(), true, move |_, _| {
             Ok(this.config_cache.take().unwrap_or_else(|| this.config())?)
         });
+        propagate_error!(state, WriteResult::Failure);
         write_to_buffer(buffer, buffer_size, size_out, &config)
     }
 
@@ -402,14 +412,17 @@ pub(super) fn create_require_function<R: Require + MaybeSend + 'static>(
     unsafe extern "C-unwind" fn find_current_file(state: *mut ffi::lua_State) -> c_int {
         let mut ar: ffi::lua_Debug = mem::zeroed();
         for level in 2.. {
-            if ffi::lua_getinfo(state, level, cstr!("s"), &mut ar) == 0 {
-                ffi::luaL_error(state, cstr!("require is not supported in this context"));
+            let found = ffi::lua_getinfo(state, level, cstr!("s"), &mut ar);
+            propagate_error!(state);
+            if found == 0 {
+                return ffi::luaL_raiseerror(state, cstr!("require is not supported in this context"));
             }
             if CStr::from_ptr(ar.what) != c"C" {
                 break;
             }
         }
         ffi::lua_pushstring(state, ar.source);
+        propagate_error!(state);
         1
     }
 
@@ -431,16 +444,22 @@ pub(super) fn create_require_function<R: Require + MaybeSend + 'static>(
         let context_ptr = push_userdata(state, RefCell::new(Context::new(require)), protect)?;
         protect_lua!(state, 1, 5, |state| {
             ffi::lua_pushcclosured(state, get_cache_key, cstr!("get_cache_key"), 1);
+            propagate_error!(state, ());
             ffi::lua_pushcfunctiond(state, find_current_file, cstr!("find_current_file"));
+            propagate_error!(state, ());
             ffi::luarequire_pushproxyrequire(state, init_config, context_ptr as *mut _);
+            propagate_error!(state, ());
             // Anchor to the config userdata to keep the context alive
             ffi::lua_getupvalue(state, -1, 1);
             ffi::lua_createtable(state, 1, 0);
+            propagate_error!(state, ());
             ffi::lua_getupvalue(state, 1, 1);
             ffi::lua_rawseti(state, -2, 1);
+            propagate_error!(state, ());
             ffi::lua_setmetatable(state, -2);
             ffi::lua_pop(state, 1);
             ffi::luaL_getsubtable(state, ffi::LUA_REGISTRYINDEX, ffi::LUA_REGISTERED_MODULES_TABLE);
+            propagate_error!(state, ());
             ffi::luaL_getsubtable(state, ffi::LUA_REGISTRYINDEX, cstr!("__MLUA_LOADER_CACHE"));
         })?;
         <(Function, Function, Function, Table, Table)>::from_stack_multi(5, &rawlua)
@@ -448,18 +467,24 @@ pub(super) fn create_require_function<R: Require + MaybeSend + 'static>(
 
     unsafe extern "C-unwind" fn error(state: *mut ffi::lua_State) -> c_int {
         ffi::luaL_where(state, 1);
+        propagate_error!(state);
         ffi::lua_pushvalue(state, 1);
         ffi::lua_concat(state, 2);
-        ffi::lua_error(state);
+        propagate_error!(state);
+        raise_error!(state)
     }
 
     unsafe extern "C-unwind" fn r#type(state: *mut ffi::lua_State) -> c_int {
         ffi::lua_pushstring(state, ffi::lua_typename(state, ffi::lua_type(state, 1)));
+        propagate_error!(state);
         1
     }
 
     unsafe extern "C-unwind" fn to_lowercase(state: *mut ffi::lua_State) -> c_int {
-        let s = ffi::luaL_checkstring(state, 1);
+        let mut s = ptr::null();
+        if ffi::luaL_requirestring(state, 1, &mut s) == 0 {
+            return ffi::LUA_RAISED;
+        }
         let s = CStr::from_ptr(s);
         if !s.to_bytes().iter().any(|&c| c.is_ascii_uppercase()) {
             // If the string does not contain any uppercase ASCII letters, return it as is

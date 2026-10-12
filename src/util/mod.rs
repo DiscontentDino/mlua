@@ -38,6 +38,15 @@ pub(crate) unsafe fn check_stack(state: *mut ffi::lua_State, amount: c_int) -> R
     }
 }
 
+#[inline(always)]
+pub(crate) unsafe fn check_pending_error(_state: *mut ffi::lua_State) -> Result<()> {
+    #[cfg(feature = "luau-errors-as-returns")]
+    if ffi::lua_haserror(_state) != 0 {
+        return Err(Error::MemoryError("not enough memory".to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) struct StackGuard {
     state: *mut ffi::lua_State,
     top: c_int,
@@ -144,6 +153,7 @@ pub(crate) unsafe fn rawget_field(state: *mut ffi::lua_State, table: c_int, fiel
     ffi::lua_pushvalue(state, table);
     protect_lua!(state, 1, 1, |state| {
         ffi::lua_pushlstring(state, field.as_ptr() as *const c_char, field.len());
+        propagate_error!(state, ffi::LUA_TNIL);
         ffi::lua_rawget(state, -2)
     })
 }
@@ -153,6 +163,7 @@ pub(crate) unsafe fn rawset_field(state: *mut ffi::lua_State, table: c_int, fiel
     ffi::lua_pushvalue(state, table);
     protect_lua!(state, 2, 0, |state| {
         ffi::lua_pushlstring(state, field.as_ptr() as *const c_char, field.len());
+        propagate_error!(state, ());
         ffi::lua_rotate(state, -3, 2);
         ffi::lua_rawset(state, -3);
     })
@@ -161,11 +172,13 @@ pub(crate) unsafe fn rawset_field(state: *mut ffi::lua_State, table: c_int, fiel
 // A variant of `pcall` that does not allow Lua to catch Rust panics from `callback_error`.
 pub(crate) unsafe extern "C-unwind" fn safe_pcall(state: *mut ffi::lua_State) -> c_int {
     ffi::luaL_checkstack(state, 2, ptr::null());
+    propagate_error!(state);
 
     let top = ffi::lua_gettop(state);
     if top == 0 {
         ffi::lua_pushstring(state, cstr!("not enough arguments to pcall"));
-        ffi::lua_error(state);
+        propagate_error!(state);
+        raise_error!(state);
     }
 
     if ffi::lua_pcall(state, top - 1, ffi::LUA_MULTRET, 0) == ffi::LUA_OK {
@@ -175,7 +188,7 @@ pub(crate) unsafe extern "C-unwind" fn safe_pcall(state: *mut ffi::lua_State) ->
     } else {
         let wf_ud = get_internal_userdata::<WrappedFailure>(state, -1, ptr::null());
         if let Some(WrappedFailure::Panic(_)) = wf_ud.as_ref() {
-            ffi::lua_error(state);
+            raise_error!(state);
         }
         ffi::lua_pushboolean(state, 0);
         ffi::lua_insert(state, -2);
@@ -187,6 +200,7 @@ pub(crate) unsafe extern "C-unwind" fn safe_pcall(state: *mut ffi::lua_State) ->
 pub(crate) unsafe extern "C-unwind" fn safe_xpcall(state: *mut ffi::lua_State) -> c_int {
     unsafe extern "C-unwind" fn xpcall_msgh(state: *mut ffi::lua_State) -> c_int {
         ffi::luaL_checkstack(state, 2, ptr::null());
+        propagate_error!(state);
 
         let wf_ud = get_internal_userdata::<WrappedFailure>(state, -1, ptr::null());
         if let Some(WrappedFailure::Panic(_)) = wf_ud.as_ref() {
@@ -195,20 +209,24 @@ pub(crate) unsafe extern "C-unwind" fn safe_xpcall(state: *mut ffi::lua_State) -
             ffi::lua_pushvalue(state, ffi::lua_upvalueindex(1));
             ffi::lua_insert(state, 1);
             ffi::lua_call(state, ffi::lua_gettop(state) - 1, ffi::LUA_MULTRET);
+            propagate_error!(state);
             ffi::lua_gettop(state)
         }
     }
 
     ffi::luaL_checkstack(state, 2, ptr::null());
+    propagate_error!(state);
 
     let top = ffi::lua_gettop(state);
     if top < 2 {
         ffi::lua_pushstring(state, cstr!("not enough arguments to xpcall"));
-        ffi::lua_error(state);
+        propagate_error!(state);
+        raise_error!(state);
     }
 
     ffi::lua_pushvalue(state, 2);
     ffi::lua_pushcclosure(state, xpcall_msgh, 1);
+    propagate_error!(state);
     ffi::lua_copy(state, 1, 2);
     ffi::lua_replace(state, 1);
 
@@ -219,7 +237,7 @@ pub(crate) unsafe extern "C-unwind" fn safe_xpcall(state: *mut ffi::lua_State) -
     } else {
         let wf_ud = get_internal_userdata::<WrappedFailure>(state, -1, ptr::null());
         if let Some(WrappedFailure::Panic(_)) = wf_ud.as_ref() {
-            ffi::lua_error(state);
+            raise_error!(state);
         }
         ffi::lua_pushboolean(state, 0);
         ffi::lua_insert(state, -2);
